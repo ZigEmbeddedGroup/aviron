@@ -18,6 +18,15 @@ pub fn build(b: *std.Build) !void {
     // Targets
     const test_step = b.step("test", "Run test suite");
     const run_step = b.step("run", "Run the app");
+    const tables_step = b.step("tables", "Installs the table generator");
+    const debug_testsuite_step = b.step("debug-testsuite", "Installs all testsuite examples");
+
+    // Deps
+    const args_dep = b.dependency("args", .{});
+
+    // Dep modules
+
+    const args_module = args_dep.module("args");
 
     // Options
     const target = b.standardTargetOptions(.{});
@@ -29,6 +38,10 @@ pub fn build(b: *std.Build) !void {
         .source_file = .{ .path = "src/main.zig" },
     });
 
+    const isa_module = b.createModule(.{
+        .source_file = .{ .path = "src/shared/isa.zig" },
+    });
+
     // Main executable
 
     const exe = b.addExecutable(.{
@@ -37,6 +50,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    exe.addModule("args", args_module);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -56,12 +70,22 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     generate_tables_exe.addModule("aviron", aviron_module);
+    generate_tables_exe.addModule("isa", isa_module);
+
+    tables_step.dependOn(&b.addInstallArtifact(generate_tables_exe, .{}).step);
 
     const run_generate_tables_cmd = b.addRunArtifact(generate_tables_exe);
 
     const tables_zig_file = run_generate_tables_cmd.addOutputFileArg("tables.zig");
 
-    exe.addAnonymousModule("autogen-tables", .{ .source_file = tables_zig_file });
+    exe.addAnonymousModule("autogen-tables", .{
+        .source_file = tables_zig_file,
+        .dependencies = &.{
+            .{ .name = "isa", .module = isa_module },
+        },
+    });
+    tables_zig_file.addStepDependencies(&exe.step);
+    exe.addModule("isa", isa_module);
 
     // Samples
     for (samples) |sample_name| {
@@ -73,6 +97,7 @@ pub fn build(b: *std.Build) !void {
         });
         sample.bundle_compiler_rt = false;
         sample.setLinkerScriptPath(std.build.FileSource{ .path = "linker.ld" });
+        sample.strip = false;
 
         // install to the prefix:
         const install_elf_sample = b.addInstallFile(sample.getEmittedBin(), b.fmt("samples/{s}.elf", .{sample_name}));
@@ -101,26 +126,95 @@ pub fn build(b: *std.Build) !void {
             if (entry.kind != .file)
                 continue;
 
-            var file = try entry.dir.openFile(entry.basename, .{});
-            defer file.close();
+            const FileAction = union(enum) {
+                compile,
+                load,
+                ignore,
+                unknown,
+            };
 
-            const config = try loadTestSuiteConfig(b, file);
+            const extension_to_action = .{
+                .c = .compile,
+                .cpp = .compile,
+                .S = .compile,
+                .zig = .compile,
 
-            const test_payload = b.addExecutable(.{
-                .name = entry.basename,
-                .root_source_file = .{ .path = b.fmt("testsuite/{s}", .{entry.path}) },
-                .target = avr_target,
-                .optimize = config.optimize,
-            });
-            test_payload.bundle_compiler_rt = false;
-            test_payload.setLinkerScriptPath(std.build.FileSource{ .path = "linker.ld" });
+                .bin = .load,
+
+                .inc = .ignore,
+                .h = .ignore,
+                .json = .ignore,
+            };
+
+            const ext = std.fs.path.extension(entry.basename);
+            const action: FileAction = inline for (std.meta.fields(@TypeOf(extension_to_action))) |fld| {
+                const action: FileAction = @field(extension_to_action, fld.name);
+
+                if (std.mem.eql(u8, ext, "." ++ fld.name))
+                    break action;
+            } else .unknown;
+
+            const ConfigAndExe = struct {
+                binary: std.Build.LazyPath,
+                config: TestSuiteConfig,
+            };
+
+            const cae: ConfigAndExe = switch (action) {
+                .unknown => std.debug.panic("Unknown test action on file testsuite/{s}, please fix the build script.", .{entry.path}),
+                .ignore => continue,
+
+                .compile => blk: {
+                    var file = try entry.dir.openFile(entry.basename, .{});
+                    defer file.close();
+
+                    const config = try parseTestSuiteConfig(b, file);
+
+                    const test_payload = b.addExecutable(.{
+                        .name = std.fs.path.stem(entry.basename),
+                        .root_source_file = .{ .path = b.fmt("testsuite/{s}", .{entry.path}) },
+                        .target = avr_target,
+                        .optimize = config.optimize,
+                    });
+                    test_payload.bundle_compiler_rt = false;
+                    test_payload.setLinkerScriptPath(std.build.FileSource{ .path = "linker.ld" });
+                    test_payload.addAnonymousModule("testsuite", .{
+                        .source_file = .{ .path = "src/libtestsuite/lib.zig" },
+                    });
+                    test_payload.strip = false;
+
+                    debug_testsuite_step.dependOn(&b.addInstallFile(
+                        test_payload.getEmittedBin(),
+                        b.fmt("testsuite/{s}/{s}.elf", .{
+                            std.fs.path.dirname(entry.path) orelse ".",
+                            std.fs.path.stem(entry.basename),
+                        }),
+                    ).step);
+
+                    break :blk ConfigAndExe{
+                        .binary = test_payload.getEmittedBin(),
+                        .config = config,
+                    };
+                },
+                .load => blk: {
+                    const config = if (entry.dir.openFile(b.fmt("{s}.json", .{entry.basename}), .{})) |file| cfg: {
+                        defer file.close();
+                        break :cfg try loadTestSuiteConfig(b, file);
+                    } else |_| TestSuiteConfig{};
+
+                    break :blk ConfigAndExe{
+                        .binary = .{ .path = b.dupe(entry.path) },
+                        .config = config,
+                    };
+                },
+            };
 
             const test_run = b.addRunArtifact(exe);
-            test_run.addFileArg(test_payload.getEmittedBin());
+            test_run.addFileArg(cae.binary);
 
-            test_run.expectExitCode(config.exit_code);
-            test_run.expectStdOutEqual(config.stdout);
-            test_run.expectStdErrEqual(config.stderr);
+            test_run.setStdIn(.{ .bytes = cae.config.stdin });
+            test_run.expectExitCode(cae.config.exit_code);
+            test_run.expectStdOutEqual(cae.config.stdout);
+            test_run.expectStdErrEqual(cae.config.stderr);
 
             test_step.dependOn(&test_run.step);
         }
@@ -131,11 +225,27 @@ const TestSuiteConfig = struct {
     exit_code: u8 = 0,
     stdout: []const u8 = "",
     stderr: []const u8 = "",
+    stdin: []const u8 = "",
+    mileage: ?u32 = 0,
 
     optimize: std.builtin.OptimizeMode = .ReleaseSmall,
 };
 
 fn loadTestSuiteConfig(b: *std.Build, file: std.fs.File) !TestSuiteConfig {
+    var reader = std.json.reader(b.allocator, file.reader());
+    defer reader.deinit();
+
+    return try std.json.parseFromTokenSourceLeaky(
+        TestSuiteConfig,
+        b.allocator,
+        &reader,
+        .{
+            .allocate = .alloc_always,
+        },
+    );
+}
+
+fn parseTestSuiteConfig(b: *std.Build, file: std.fs.File) !TestSuiteConfig {
     var code = std.ArrayList(u8).init(b.allocator);
     defer code.deinit();
 
