@@ -31,7 +31,7 @@ pub fn main() !u8 {
     var eeprom = aviron.EEPROM.Static(1024){};
     var io = IO{
         .sreg = undefined,
-        .sp = 2047,
+        .sp = sram.data.len - 1,
     };
 
     var cpu = aviron.Cpu{
@@ -66,8 +66,8 @@ pub fn main() !u8 {
         try stdout.print("Information for {s}:\n", .{@tagName(cli.options.mcu)});
         try stdout.print("  Generation: {s: >11}\n", .{@tagName(cpu.instruction_set)});
         try stdout.print("  Code Model: {s: >11}\n", .{@tagName(cpu.code_model)});
-        try stdout.print("  RAM:        {d: >5} bytes\n", .{cpu.flash.size});
-        try stdout.print("  Flash:      {d: >5} bytes\n", .{cpu.sram.size});
+        try stdout.print("  Flash:      {d: >5} bytes\n", .{cpu.flash.size});
+        try stdout.print("  RAM:        {d: >5} bytes\n", .{cpu.sram.size});
         try stdout.print("  EEPROM:     {d: >5} bytes\n", .{cpu.eeprom.size});
         return 0;
     }
@@ -141,7 +141,7 @@ const Cli = struct {
 };
 
 const IO = struct {
-    scratch_regs: [16]u8 = .{0} ** 16,
+    scratch_regs: [16]u8 = @splat(0),
 
     sp: u16,
     sreg: *aviron.Cpu.SREG,
@@ -227,7 +227,7 @@ const IO = struct {
         const io: *IO = @ptrCast(@alignCast(ctx.?));
         const reg: Register = @enumFromInt(addr);
         switch (reg) {
-            .exit => std.os.exit(value & mask),
+            .exit => std.process.exit(value & mask),
             .stdio => std.io.getStdOut().writer().writeByte(value & mask) catch @panic("i/o failure"),
             .stderr => std.io.getStdErr().writer().writeByte(value & mask) catch @panic("i/o failure"),
 
@@ -259,16 +259,16 @@ const IO = struct {
     fn lobyte(val: *u16) *u8 {
         const bits: *[2]u8 = @ptrCast(val);
         return switch (comptime builtin.cpu.arch.endian()) {
-            .Big => return &bits[1],
-            .Little => return &bits[0],
+            .big => return &bits[1],
+            .little => return &bits[0],
         };
     }
 
     fn hibyte(val: *u16) *u8 {
         const bits: *[2]u8 = @ptrCast(val);
         return switch (comptime builtin.cpu.arch.endian()) {
-            .Big => return &bits[0],
-            .Little => return &bits[1],
+            .big => return &bits[0],
+            .little => return &bits[1],
         };
     }
 

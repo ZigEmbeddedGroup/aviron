@@ -103,7 +103,7 @@ fn validateSystemAndExit(exit_mode: ExitMode) noreturn {
         std.debug.print("test {s} failed.\n", .{ts.options.name});
     }
 
-    std.os.exit(if (ok) 0x00 else 0x01);
+    std.process.exit(if (ok) 0x00 else 0x01);
 }
 
 pub fn main() !u8 {
@@ -149,6 +149,8 @@ pub fn main() !u8 {
 
         .cpu = aviron.Cpu{
             .trace = cli.options.trace,
+
+            .instruction_set = .avr5,
 
             .flash = test_system.flash_storage.memory(),
             .sram = test_system.sram.memory(),
@@ -222,7 +224,7 @@ pub fn main() !u8 {
 const IO = struct {
     config: testconfig.TestSuiteConfig,
 
-    scratch_regs: [16]u8 = .{0} ** 16,
+    scratch_regs: [16]u8 = @splat(0),
 
     sp: u16,
     sreg: *aviron.Cpu.SREG,
@@ -352,16 +354,16 @@ const IO = struct {
     fn lobyte(val: *u16) *u8 {
         const bits: *[2]u8 = @ptrCast(val);
         return switch (comptime builtin.cpu.arch.endian()) {
-            .Big => return &bits[1],
-            .Little => return &bits[0],
+            .big => return &bits[1],
+            .little => return &bits[0],
         };
     }
 
     fn hibyte(val: *u16) *u8 {
         const bits: *[2]u8 = @ptrCast(val);
         return switch (comptime builtin.cpu.arch.endian()) {
-            .Big => return &bits[0],
-            .Little => return &bits[1],
+            .big => return &bits[0],
+            .little => return &bits[1],
         };
     }
 

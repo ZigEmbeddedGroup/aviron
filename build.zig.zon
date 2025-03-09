@@ -1,10 +1,24 @@
 .{
-    .name = "aviron",
+    .name = .aviron,
     .version = "0.1.0",
+    .fingerprint = 0x5dcc57b3c9d31477,
     .dependencies = .{
         .args = .{
-            .url = "https://github.com/MasterQ32/zig-args/archive/bb2eced8ddf28114b3a1ff761c2d80b90b1a61e2.tar.gz",
-            .hash = "12208556082c280af264ca2a174fd04fc7a35f865bfe59e2c61f4a977bf7a65063e4",
+            .url = "git+https://github.com/MasterQ32/zig-args#9425b94c103a031777fdd272c555ce93a7dea581",
+            .hash = "args-0.0.0-CiLiqv_NAAC97fGpk9hS2K681jkiqPsWP6w3ucb_ctGH",
         },
+    },
+    .paths = .{
+        "README.md",
+        "build.zig",
+        "build.zig.zon",
+        "doc",
+        "linker.ld",
+        "samples",
+        "shell.nix",
+        "src",
+        "testsuite",
+        "testsuite.avr-gcc",
+        "tools",
     },
 }

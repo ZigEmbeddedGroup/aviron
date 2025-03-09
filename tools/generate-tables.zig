@@ -3,7 +3,7 @@ const isa_def = @embedFile("isa.txt");
 const isa = @import("isa");
 
 fn stringToEnum(comptime T: type, str: []const u8) ?T {
-    inline for (@typeInfo(T).Enum.fields) |enumField| {
+    inline for (@typeInfo(T).@"enum".fields) |enumField| {
         if (std.mem.eql(u8, str, enumField.name)) {
             return @field(T, enumField.name);
         }
@@ -39,9 +39,9 @@ pub fn main() !void {
         map.deinit(allocator);
     };
 
-    var lit = std.mem.split(u8, isa_def, "\n");
+    var lit = std.mem.splitScalar(u8, isa_def, '\n');
     while (lit.next()) |line| {
-        var pit = std.mem.tokenize(u8, line, " ");
+        var pit = std.mem.tokenizeScalar(u8, line, ' ');
 
         const op_name = pit.next() orelse continue;
         const opcode = stringToEnum(isa.Opcode, op_name) orelse @panic(op_name);
@@ -60,7 +60,7 @@ pub fn main() !void {
                 '0' => {},
                 '1' => base_number_bit_set.set(index),
                 else => {
-                    var gop = try positionals.getPtr(opcode).getOrPut(allocator, r);
+                    const gop = try positionals.getPtr(opcode).getOrPut(allocator, r);
                     if (!gop.found_existing) {
                         gop.value_ptr.* = try std.BoundedArray(u8, 16).init(0);
                     }
@@ -144,7 +144,7 @@ pub fn main() !void {
     try writer.writeAll("pub const lookup = [65536]isa.Opcode {");
 
     for (lut, 0..) |v, i| {
-        try writer.print(".{s},", .{std.zig.fmtId(@tagName(v))});
+        try writer.print(".{},", .{std.zig.fmtId(@tagName(v))});
         if ((i + 1) % 16 == 0) {
             try writer.print("\n", .{});
         }
@@ -180,7 +180,7 @@ pub fn main() !void {
 
     try writer.writeAll("};");
 
-    var txt = try buf.toOwnedSliceSentinel(0);
+    const txt = try buf.toOwnedSliceSentinel(0);
     defer allocator.free(txt);
 
     var tree = try std.zig.Ast.parse(allocator, txt, .zig);
