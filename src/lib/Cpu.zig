@@ -157,15 +157,16 @@ fn fetchCode(cpu: *Cpu) u16 {
 }
 
 fn push(cpu: *Cpu, val: u8) void {
-    const sp = cpu.getSP();
+    const sp = cpu.getSP() -% 1;
+    cpu.setSP(sp);
     cpu.sram.write(sp, val);
-    cpu.setSP(sp -% 1);
 }
 
 fn pop(cpu: *Cpu) u8 {
-    const sp = cpu.getSP() +% 1;
-    cpu.setSP(sp);
-    return cpu.sram.read(sp);
+    const sp = cpu.getSP();
+    const v = cpu.sram.read(sp);
+    cpu.setSP(sp +% 1);
+    return v;
 }
 
 fn pushCodeLoc(cpu: *Cpu, val: u24) void {
