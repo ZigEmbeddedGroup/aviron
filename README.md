@@ -1,5 +1,7 @@
 # AViRon
 
+This module is now located [here](https://github.com/ZigEmbeddedGroup/microzig/tree/main/simulators/aviron)
+
 AVR simulator in Zig.
 
 > DISCLAIMER: This is work in project and can currently emulate a good amount of the AVR instruction set without cycle counting.
